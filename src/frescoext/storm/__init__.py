@@ -135,13 +135,14 @@ def getstore(environ=None, database=None, rollback=True):
     return store
 
 
-def autoretry(retry_on=None, database=None, always_commit=False, init_backoff=0.2, max_attempts=5):
+def autoretry(retry_on=None, database=None, always_commit=False, _getstore=None, init_backoff=0.2, max_attempts=5):
     """
     If a TransactionRollbackError occurs due to a concurrent update, this
     decorator will re-run the request.
 
-    :param retry_on: tuple of exception classes to retry on, or None for the default
-    :param database: the database store name, as configured through ``add_connection``
+    :param retry_on: tuple of exception classes to retry on, or None for the default.
+    :param database: the database store name, as configured through ``add_connection``.
+    :param _getstore: a callable returning a store object. overrides ``database``.
     :param always_commit: If true, commit the store unless an exception is
                           raised. The default is to roll back if an error
                           response is returned.
@@ -157,12 +158,14 @@ def autoretry(retry_on=None, database=None, always_commit=False, init_backoff=0.
     from time import sleep
 
     retry_on = retry_on or retryable_errors
+    if _getstore is None:
+        _getstore = lambda: getstore(getattr(context, 'request', None), rollback=False, database=database)
 
     def decorator(func):
         @wraps(func)
         def decorated(*args, **kwargs):
 
-            store = getstore(getattr(context, 'request', None), rollback=False, database=database)
+            store = _getstore()
             backoff = init_backoff
             attempts = max_attempts
 
@@ -200,20 +203,29 @@ def autoretry(retry_on=None, database=None, always_commit=False, init_backoff=0.
         return decorated
     return decorator
 
-def autocommit(retry=True, retry_on=None, database=None):
+def autocommit(retry=True, retry_on=None, database=None, _getstore=None):
     """
     Call store.commit() after a successful call to ``func``, or rollback in
     case of error.
+
+    :param retry: If ``True`` conflicting changes will be retired automatically
+    :param retry_on: List of exceptions to retry the request on, or None for
+                     the defaults
+    :param database: database connection name
+    :param _getstore: callable returning a store object. overrides ``database``.
     """
 
     from pesto import Response
+    if _getstore is None:
+        _getstore = lambda: getstore(getattr(context, 'request', None), rollback=False, database=database)
+
     def decorator(func):
         if retry:
-            func = autoretry(retry_on, database)(func)
+            func = autoretry(retry_on, database, _getstore=_getstore)(func)
 
         @wraps(func)
         def decorated(*args, **kwargs):
-            store = getstore(getattr(context, 'request', None), rollback=False, database=database)
+            store = _getstore()
             try:
                 result = func(*args, **kwargs)
             except Exception:
