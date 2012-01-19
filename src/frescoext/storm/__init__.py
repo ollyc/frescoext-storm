@@ -136,7 +136,7 @@ def getstore(environ=None, database=None, rollback=True):
 
     if rollback and environ is not None:
         store.rollback()
-        environ['fresco.storm.%s' % database] = store
+        environ[environ_prefix + database] = store
     return store
 
 

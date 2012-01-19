@@ -1,4 +1,5 @@
 from pesto.wsgiutils import ClosingIterator
+from . import environ_prefix
 
 __all__ = 'AutoRollbackMiddleware',
 
@@ -13,9 +14,11 @@ class AutoRollbackMiddleware(object):
 
     def __call__(self, environ, start_response):
         def rollback_stores():
-            for item in environ.keys():
-                if item[:13] == 'fresco.storm.':
+            l = len(environ_prefix)
+            for item in list(environ.keys()):
+                if item[:l] == environ_prefix:
                     environ[item].rollback()
+                    del environ[item]
 
         return ClosingIterator(self.app(environ, start_response),
                                rollback_stores)
