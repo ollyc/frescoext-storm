@@ -9,21 +9,26 @@ from fresco.core import context
 from pesto import Request
 from pesto.wsgiutils import ClosingIterator
 
+from storm.database import create_database
+from storm.store import Store
+from storm.exceptions import DatabaseError, IntegrityError
+
 logger = getLogger(__name__)
 
-retryable_errors = tuple()
+#: Name of the default connection
+default_connection = None
+
+#: Default list of errors to retry
+retryable_errors = (IntegrityError,)
+
+#: Prefix for key in WSGI environ dict
+environ_prefix = 'frescoext.storm.'
+
 try:
     from psycopg2.extensions import TransactionRollbackError
     retryable_errors += (TransactionRollbackError,)
 except ImportError:
     pass
-
-try:
-    from storm.database import create_database
-    from storm.store import Store
-    from storm.exceptions import DatabaseError
-except ImportError:
-    logger.warn("Storm package not available")
 
 class StorePools(dict):
     """
@@ -123,7 +128,7 @@ def getstore(environ=None, database=None, rollback=True):
 
     if environ:
         try:
-            return environ['fresco.storm.%s' % database]
+            return environ[environ_prefix + database]
         except (TypeError, KeyError):
             pass
 
