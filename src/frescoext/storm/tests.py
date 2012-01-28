@@ -84,6 +84,6 @@ class TestGetStorm(object):
     def test_getstore_returns_request_bound_store(self):
 
         environ = {}
-        assert getstore(environ) is environ['fresco.storm.mydb']
+        assert getstore(environ) is environ['frescoext.storm.mydb']
 
 
