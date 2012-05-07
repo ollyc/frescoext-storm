@@ -5,6 +5,7 @@ from fresco.core import context, Request
 from nose.tools import assert_raises
 from storm.exceptions import ClosedError
 
+
 class TestAddConnection(object):
 
     @classmethod
@@ -19,8 +20,11 @@ class TestAddConnection(object):
     def test_add_connection_sets_default(self):
         add_connection('mydb', 'sqlite:?conn=1')
         add_connection('mydb2', 'sqlite:?conn=2', default=True)
-        assert getstore({}).get_database() is getstore({}, 'mydb2').get_database()
-        assert getstore({}).get_database() is not getstore({}, 'mydb').get_database()
+        assert getstore({}).get_database()\
+                is getstore({}, 'mydb2').get_database()
+        assert getstore({}).get_database()\
+                is not getstore({}, 'mydb').get_database()
+
 
 class TestPoolDisconnect(object):
 
@@ -56,6 +60,7 @@ class TestPoolDisconnect(object):
         assert_raises(ClosedError, store1.execute, "SELECT 1")
         store2.execute("SELECT 1")
 
+
 class TestGetStorm(object):
 
     @classmethod
@@ -85,5 +90,3 @@ class TestGetStorm(object):
 
         environ = {}
         assert getstore(environ) is environ['frescoext.storm.mydb']
-
-

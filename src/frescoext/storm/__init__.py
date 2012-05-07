@@ -3,11 +3,10 @@ WSGI service providing per request storm store objects
 """
 from functools import wraps
 from logging import getLogger
+from random import random
 from weakref import WeakKeyDictionary
 
 from fresco.core import context
-from pesto import Request
-from pesto.wsgiutils import ClosingIterator
 
 from storm.database import create_database
 from storm.store import Store
@@ -30,6 +29,7 @@ try:
 except ImportError:
     pass
 
+
 class StorePools(dict):
     """
     Collection of StorePool objects
@@ -41,6 +41,7 @@ class StorePools(dict):
         """
         for item in self.values():
             item.disconnect()
+
 
 class StorePool(object):
     """
@@ -100,7 +101,9 @@ class StorePool(object):
     def __repr__(self):
         return "<%s %r, active=%d>" % (self.__class__.__name__,
                                        self.dsn,
-                                       len(list(s for s in self.all_stores if hasattr(s, 'store'))))
+                                       len(list(s for s in self.all_stores
+                                                  if hasattr(s, 'store'))))
+
 
 def getstore(environ=None, database=None, rollback=True):
     """
@@ -140,14 +143,18 @@ def getstore(environ=None, database=None, rollback=True):
     return store
 
 
-def autoretry(retry_on=None, database=None, always_commit=False, _getstore=None, init_backoff=0.2, max_attempts=5):
+def autoretry(retry_on=None, database=None, always_commit=False,
+              _getstore=None, init_backoff=0.2, max_attempts=5):
     """
     If a TransactionRollbackError occurs due to a concurrent update, this
     decorator will re-run the request.
 
-    :param retry_on: tuple of exception classes to retry on, or None for the default.
-    :param database: the database store name, as configured through ``add_connection``.
-    :param _getstore: a callable returning a store object. overrides ``database``.
+    :param retry_on: tuple of exception classes to retry on, or None for the
+                     default.
+    :param database: the database store name, as configured through
+                     ``add_connection``.
+    :param _getstore: a callable returning a store object. overrides
+                      ``database``.
     :param always_commit: If true, commit the store unless an exception is
                           raised. The default is to roll back if an error
                           response is returned.
@@ -164,7 +171,8 @@ def autoretry(retry_on=None, database=None, always_commit=False, _getstore=None,
 
     retry_on = retry_on or retryable_errors
     if _getstore is None:
-        _getstore = lambda: getstore(getattr(context, 'request', None), rollback=False, database=database)
+        _getstore = lambda: getstore(getattr(context, 'request', None),
+                                     rollback=False, database=database)
 
     def decorator(func):
         @wraps(func)
@@ -208,6 +216,7 @@ def autoretry(retry_on=None, database=None, always_commit=False, _getstore=None,
         return decorated
     return decorator
 
+
 def autocommit(retry=True, retry_on=None, database=None, _getstore=None):
     """
     Call store.commit() after a successful call to ``func``, or rollback in
@@ -217,12 +226,14 @@ def autocommit(retry=True, retry_on=None, database=None, _getstore=None):
     :param retry_on: List of exceptions to retry the request on, or None for
                      the defaults
     :param database: database connection name
-    :param _getstore: callable returning a store object. overrides ``database``.
+    :param _getstore: callable returning a store object. overrides
+                      ``database``.
     """
 
-    from pesto import Response
+    from fresco import Response
     if _getstore is None:
-        _getstore = lambda: getstore(getattr(context, 'request', None), rollback=False, database=database)
+        _getstore = lambda: getstore(getattr(context, 'request', None),
+                                     rollback=False, database=database)
 
     def decorator(func):
         if retry:
@@ -236,12 +247,14 @@ def autocommit(retry=True, retry_on=None, database=None, _getstore=None):
             except Exception:
                 store.rollback()
                 raise
-            if not isinstance(result, Response) or 200 <= result.status_code < 400:
+            if not isinstance(result, Response) \
+               or 200 <= result.status_code < 400:
                 store.commit()
             return result
 
         return decorated
     return decorator
+
 
 def add_connection(name, dsn, default=False):
     """
@@ -257,11 +270,13 @@ def add_connection(name, dsn, default=False):
         default_connection = name
     store_pools[name] = StorePool.create(dsn)
 
+
 def _remove_all_connections():
     """
     Reset the global state of this module.
     Convenience function for the test suite.
     """
+    global default_connection
     store_pools.disconnect_all()
     store_pools.clear()
     StorePool._pools.clear()
