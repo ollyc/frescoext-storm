@@ -126,7 +126,7 @@ def getstore(environ=None, database=None, rollback=True):
         except AttributeError:
             pass
 
-    elif isinstance(environ, Request):
+    elif hasattr(environ, 'environ'):
         environ = environ.environ
 
     if environ:
