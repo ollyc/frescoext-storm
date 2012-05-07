@@ -74,15 +74,18 @@ class TestGetStorm(object):
     def test_getstore_returns_new_store_in_new_context(self):
 
         saved = context._ident_func
-        context._ident_func = lambda: None
+
+        s1 = getstore()
+        # Patch _ident_func to ensue that context.push() creates an insulated
+        # request context
+        object.__setattr__(context, '_ident_func', lambda: None)
         try:
-            s1 = getstore()
-            context.push_context(request=Request({}))
+            context.push(request=Request({}))
             s2 = getstore()
-            context.pop_context()
-            s3 = getstore()
+            context.pop()
         finally:
-            context._ident_func = saved
+            object.__setattr__(context, '_ident_func', saved)
+        s3 = getstore()
         assert s1 is not s2
         assert s1 is s3
 
