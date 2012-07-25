@@ -101,7 +101,7 @@ class StorePool(object):
     def __repr__(self):
         return "<%s %r, active=%d>" % (self.__class__.__name__,
                                        self.dsn,
-                                       len(list(s for s in self.all_stores
+                                       len(list(s for s in self._all_stores
                                                   if hasattr(s, 'store'))))
 
 
