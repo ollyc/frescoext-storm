@@ -1,15 +1,17 @@
 """
 WSGI service providing per request storm store objects
 """
+import threading
 from functools import wraps
 from logging import getLogger
 from random import random
-from weakref import WeakKeyDictionary
+from weakref import WeakValueDictionary
 
 from fresco.core import context
 
 from storm.database import create_database
 from storm.store import Store
+from storm.uri import URI
 from storm.exceptions import DatabaseError, IntegrityError
 
 logger = getLogger(__name__)
@@ -30,53 +32,44 @@ except ImportError:
     pass
 
 
-class StorePools(dict):
-    """
-    Collection of StorePool objects
-    """
-
-    def disconnect_all(self):
-        """
-        Call ``disconnect`` on all configured StorePools.
-        """
-        for item in self.values():
-            item.disconnect()
-
-
 class StorePool(object):
     """
     Store pool that maintains a single store per request context.
     """
-    _pools = {}
 
-    @classmethod
-    def create(cls, dsn):
-        """
-        Factory method to return a StorePool object.
+    def __init__(self):
+        self._local = threading.local()
+        self._all_stores = WeakValueDictionary()
+        self._databases = {}
+        self.uris = {}
 
-        Will always return the same StorePool object when called with the same
-        dsn.
-        """
-        if dsn in cls._pools:
-            return cls._pools[dsn]
-        return cls(dsn)
+    def add(self, name, uri):
+        if not isinstance(uri, URI):
+            uri = URI(uri)
+        self.uris.setdefault(name, uri)
+        self._databases.setdefault(name, create_database(uri))
 
-    def __init__(self, dsn):
-        self.dsn = dsn
-        self.db = create_database(dsn)
-        # Keep a handle on all store objects currently assigned
-        self._all_stores = WeakKeyDictionary()
-        self._context_attr = '_store_%d' % id(self)
-        self.__class__._pools[dsn] = self
-
-    def getstore(self):
+    def getstore(self, name, fresh=False):
         try:
-            return getattr(context, self._context_attr)
+            stores = self._local.stores
         except AttributeError:
-            s = Store(self.db)
-            setattr(context, self._context_attr, s)
-            self._all_stores[s] = None
-            return s
+            stores = self._local.stores = WeakValueDictionary()
+
+        if fresh:
+            return self._getstore_fresh(name)
+
+        try:
+            return stores[name]
+        except KeyError:
+            return stores.setdefault(name, self._getstore_fresh(name))
+
+    def _getstore_fresh(self, name):
+        """
+        Return a fresh store object
+        """
+        store = Store(self._databases[name])
+        self._all_stores[id(store)] = store
+        return store
 
     def disconnect(self):
         """
@@ -88,21 +81,16 @@ class StorePool(object):
 
         Subsequent calls to ``getstore`` will return a fresh store object
         """
-        active = list(self._all_stores)
-        for s in active:
-            del self._all_stores[s]
-            s.rollback()
-            s.close()
-        try:
-            delattr(context, self._context_attr)
-        except AttributeError:
-            pass
+        self._local = threading.local()
+        for key, store in self._all_stores.items():
+            del self._all_stores[key]
+            store.rollback()
+            store.close()
 
     def __repr__(self):
         return "<%s %r, active=%d>" % (self.__class__.__name__,
                                        self.dsn,
-                                       len(list(s for s in self._all_stores
-                                                  if hasattr(s, 'store'))))
+                                       len(self._all_stores))
 
 
 def getstore(environ=None, database=None, rollback=True):
@@ -126,20 +114,34 @@ def getstore(environ=None, database=None, rollback=True):
         except AttributeError:
             pass
 
-    elif hasattr(environ, 'environ'):
-        environ = environ.environ
+    else:
+        environ = getattr(environ, 'environ', environ)
 
-    if environ:
-        try:
-            return environ[environ_prefix + database]
-        except (TypeError, KeyError):
-            pass
-
-    store = store_pools[database].getstore()
-
-    if rollback and environ is not None:
+    if environ is None:
+        store = store_pool.getstore(database)
         store.rollback()
-        environ[environ_prefix + database] = store
+        return store
+
+    environ_key = environ_prefix + database
+
+    try:
+        return environ[environ_prefix + database]
+    except (TypeError, KeyError):
+        pass
+
+    for c in context._contexts[context._ident_func()][:-1]:
+        request = c.get('request')
+
+        # A request higher up the context stack has already acquired a store.
+        # Make sure this subrequest gets a fresh store
+        if request is not None and environ_key in request.environ:
+            store = store_pool.getstore(database, fresh=True)
+            environ[environ_key] = store
+            return store
+
+    store = store_pool.getstore(database)
+    environ[environ_key] = store
+    store.rollback()
     return store
 
 
@@ -250,25 +252,27 @@ def autocommit(retry=True, retry_on=None, database=None, _getstore=None):
             if not isinstance(result, Response) \
                or 200 <= result.status_code < 400:
                 store.commit()
+            else:
+                store.rollback()
             return result
 
         return decorated
     return decorator
 
 
-def add_connection(name, dsn, default=False):
+def add_connection(name, uri, default=False):
     """
-    Create a named StorePool for the given dsn.
+    Create a named StorePool for the given uri.
 
     :param name: name for the connection
-    :param dsn: storm connection string (eg 'postgres://user:pw@host/database')
-    :param default: set this dsn to be the default connection
+    :param uri: connection uri (eg 'postgres://user:pw@host/database')
+    :param default: set this uri to be the default connection
 
     """
     global store_pools, default_connection
     if default:
         default_connection = name
-    store_pools[name] = StorePool.create(dsn)
+    store_pool.add(name, uri)
 
 
 def _remove_all_connections():
@@ -277,9 +281,7 @@ def _remove_all_connections():
     Convenience function for the test suite.
     """
     global default_connection
-    store_pools.disconnect_all()
-    store_pools.clear()
-    StorePool._pools.clear()
+    store_pool.disconnect()
     default_connection = None
 
-store_pools = StorePools()
+store_pool = StorePool()

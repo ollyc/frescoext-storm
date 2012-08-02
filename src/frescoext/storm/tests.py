@@ -1,4 +1,4 @@
-from frescoext.storm import add_connection, getstore, store_pools
+from frescoext.storm import add_connection, getstore, store_pool
 from frescoext.storm import _remove_all_connections
 from fresco.core import context, Request
 
@@ -31,7 +31,7 @@ class TestPoolDisconnect(object):
     def tearDown(self):
         _remove_all_connections()
 
-    def test_disconnect_all_removes_all_connections(self):
+    def test_disconnect_removes_all_connections(self):
 
         add_connection('mydb', 'sqlite:?conn=1')
         add_connection('mydb2', 'sqlite:?conn=2')
@@ -43,22 +43,10 @@ class TestPoolDisconnect(object):
         store1.execute("SELECT 1")
         store2.execute("SELECT 1")
 
-        store_pools.disconnect_all()
+        store_pool.disconnect()
 
         assert_raises(ClosedError, store1.execute, "SELECT 1")
         assert_raises(ClosedError, store2.execute, "SELECT 1")
-
-    def test_disconnect_doesnt_affect_other_stores(self):
-
-        add_connection('mydb', 'sqlite:?conn=1')
-        add_connection('mydb2', 'sqlite:?conn=2')
-
-        store1 = getstore({}, 'mydb')
-        store2 = getstore({}, 'mydb2')
-
-        store_pools['mydb'].disconnect()
-        assert_raises(ClosedError, store1.execute, "SELECT 1")
-        store2.execute("SELECT 1")
 
 
 class TestGetStorm(object):
@@ -73,19 +61,13 @@ class TestGetStorm(object):
 
     def test_getstore_returns_new_store_in_new_context(self):
 
-        saved = context._ident_func
-
+        context.push(request=Request({}))
         s1 = getstore()
-        # Patch _ident_func to ensue that context.push() creates an insulated
-        # request context
-        object.__setattr__(context, '_ident_func', lambda: None)
-        try:
-            context.push(request=Request({}))
-            s2 = getstore()
-            context.pop()
-        finally:
-            object.__setattr__(context, '_ident_func', saved)
+        context.push(request=Request({}))
+        s2 = getstore()
+        context.pop()
         s3 = getstore()
+        context.pop()
         assert s1 is not s2
         assert s1 is s3
 
